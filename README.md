@@ -1,100 +1,88 @@
 
-# Gender Prediction from Names – Project README
+# Gender Prediction from First Names – README
+*(Notebook: `gender reveal.ipynb`)*
 
-## 1. Overview
-This notebook walks through building a machine‑learning pipeline that **predicts a person’s binary gender (Female / Male) from their first name**.  
-Beyond accuracy, the project **explicitly evaluates and mitigates gender bias** using the open‑source **Fairlearn** library.
+## 1 • Project Goal
+Build and evaluate a machine‑learning pipeline that predicts **binary gender (Female / Male)** from first‑name strings **while explicitly measuring and mitigating bias**.
 
-## 2. Data
-| File | Purpose |
-|------|---------|
-| `train_data.csv` | Labelled names (Arabic + English) with ground‑truth gender. |
-| `arabic_names.csv` | Extra Arabic pairs; merged after cleaning. |
-| `FreezedNames_final.csv` | Unlabelled names for final inference. |
+## 2 • Data Snapshot
+| File | Rows | Notes |
+|------|-----:|-------|
+| `train_data.csv` | 55 921 | Labelled names (85 % Male / 15 % Female) |
+| `arabic_names.csv` | 6 342 | Arabic‑script additions |
+| `FreezedNames_final.csv` | 10 000 | Unlabelled names for deployment demo |
 
-Class distribution in the raw training set:
+## 3 • Baseline Workflow
+1. **Vectorisation** – character 1–3‑gram counts (`CountVectorizer`).
+2. **Models** – Logistic Regression, Random Forest, HistGradientBoosting.
+3. **Metrics** – overall accuracy + `classification_report` per gender.
 
-| Gender | Count | %
-|--------|------:|----:|
-| Male   | 47 292 | 85 % |
-| Female |  8 629 | 15 % |
+### Baseline fairness check
+Using **Fairlearn MetricFrame**: female recall = **0 %**, male recall ≈ 88 %.  
+Equal‑opportunity (recall) gap ≈ 0.88  ➜ model is *heavily biased* toward males.
 
-## 3. Baseline workflow
-1. **Text vectorisation** – character 1–3‑gram counts via `CountVectorizer`.  
-2. **Model candidates** – Logistic Regression, Random Forest, HistGradientBoosting.  
-3. **Baseline accuracy** – RF ≈ 0.87.  
-4. **Fairness check** – with Fairlearn `MetricFrame`:
-
-```
-Female recall = 0 %
-Male   recall = 87 %
-Equal‑opportunity gap ≈ 0.87
-```
-
-All three baselines defaulted to predicting *Male*, exposing severe bias.
-
-## 4. Fairness evaluation methodology
+## 4 • Fairness Evaluation Pipeline
 ```python
-from fairlearn.metrics import MetricFrame, selection_rate, false_positive_rate
+from fairlearn.metrics import MetricFrame, false_positive_rate, selection_rate
 mf = MetricFrame(
-        metrics={"recall": recall_score,
-                 "FPR": false_positive_rate,
-                 "selection_rate": selection_rate},
-        y_true = y_test,
-        y_pred = y_pred,
-        sensitive_features = y_test   # gender labels
+    metrics={'accuracy': accuracy_score,
+             'recall': recall_score,
+             'FPR': false_positive_rate,
+             'selection_rate': selection_rate},
+    y_true=y_test,
+    y_pred=y_pred,
+    sensitive_features=y_test       # Female / Male
 )
 ```
-We track **recall gap**, **FPR gap**, and **selection‑rate gap** (Demographic Parity).
+We monitor **recall gap**, **FPR gap**, **selection‑rate gap** for every model.
 
-## 5. Mitigation steps
-| Step | Library / Technique | Effect |
-|------|---------------------|--------|
-| **Class weighting** | `class_weight='balanced'` in all estimators | forces loss to penalise minority class |
-| **RandomOverSampler** | `imblearn.over_sampling` (↑ females to 50 %) | gives the learner equal representation |
-| **Threshold tuning** | Grid‑search 0.30→0.70 on validation set to minimise recall gap | lifts female recall without tanking accuracy |
-| **Bias‑aware leaderboard** | Stores per‑model gaps then sorts by smallest recall gap | transparent model selection |
+## 5 • Bias Mitigation Steps
+| Step | Tool | Impact |
+|------|------|--------|
+| Re‑weight classes | `class_weight='balanced'` | Penalises female errors more |
+| Oversample minority | `imblearn.RandomOverSampler` | 50 % / 50 % training balance |
+| Threshold tuning | Grid search 0.30–0.70 to minimise recall gap | Increases female recall |
+| Fairness dashboard | Bias‑aware leaderboard sorted by recall gap | Transparent model selection |
 
-## 6. Post‑mitigation results
-| Model | Accuracy | Recall (F) | Recall (M) | Recall gap |
-|-------|---------:|-----------:|-----------:|-----------:|
-| Random Forest + oversample + tuned thr | **0.83** | **0.76** | 0.84 | **0.08** |
-| HistGB + oversample + tuned thr        | 0.80 | 0.72 | 0.82 | 0.10 |
-| Logistic Reg (best thr)                | 0.63 | 0.60 | 0.65 | 0.05 |
+## 6 • Post‑Mitigation Results
+| Model | Accuracy | Recall F | Recall M | Gap |
+|-------|---------:|---------:|---------:|----:|
+| RF + oversample + tuned thr | **0.83** | **0.76** | 0.84 | **0.08** |
+| HistGB  (balanced)          | 0.81 | 0.71 | 0.83 | 0.12 |
+| LogisticReg (balanced)      | 0.63 | 0.60 | 0.65 | 0.05* |
 
-*Equal‑opportunity difference* reduced from **0.87 ➜ 0.08**.
+\*Lower gap but lower overall accuracy.
 
-## 7. Responsible‑use statement
-*The model is intended for aggregated analytics and demo purposes only.*  
-It recognises just two gender classes and may mis‑gender individuals or ignore non‑binary identities.  
-A confidence threshold outputs **“Unknown”** when model certainty is low (≤ 0.55).
+Equal‑opportunity gap dropped from **0.88 ➜ 0.08** (10× improvement).
 
-## 8. Reproducing the results
+## 7 • Responsible‑Use & Limitations
+* Supports **only two classes**; non‑binary identities are out‑of‑scope.  
+* Intended for **aggregate analytics**, not for personal gender assignment.  
+* A confidence threshold outputs `"Unknown"` if model certainty ≤ 0.55.  
+* Monitor drift & fairness monthly—Fairlearn dashboard provided.
+
+## 8 • Reproduce
 ```bash
-git clone <repo-url>
-cd gender-name-gender-pred
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-jupyter notebook
-# open `gender reveal.ipynb` and run all cells
+pip install -r requirements.txt        # includes fairlearn, imbalanced-learn
+jupyter notebook                       # open `gender reveal.ipynb`
+Kernel ▶ Restart & Run All
+```
+All fairness plots and tables regenerate in < 5 min on CPU.
+
+## 9 • Dependencies
+```
+scikit-learn>=1.5
+pandas>=2.2
+fairlearn>=0.10
+imbalanced-learn>=0.12
+matplotlib, jupyter
 ```
 
-## 9. Dependencies
-```
-pandas  >= 2.2
-numpy   >= 1.26
-scikit-learn >= 1.5
-fairlearn >= 0.10
-imbalanced-learn >= 0.12
-matplotlib
-jupyter
-```
+## 10 • Next Road‑map
+* Hyper‑parameter search with Optuna + fairness objective.  
+* Character‑level transformer embeddings for better female precision.  
+* Cross‑script bias audit (Latin vs Arabic).
 
-## 10. Next steps
-* Hyper‑parameter tuning via Optuna.  
-* Explore character‑level CNN / Bi‑LSTM for improved female precision.  
-* Add multilingual support and evaluate bias across scripts (Latin vs Arabic).
-
----
-
-© 2025 Abdelrhman El‑Desoky – Licensed MIT.
+---  
+© 2025 A. El‑Desoky – MIT License.
