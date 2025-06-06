@@ -1,92 +1,100 @@
 
 # Gender Prediction from Names – Project README
 
-## Overview
-This Jupyter notebook demonstrates how to build a machine‑learning pipeline that **infers a person’s gender from their first name**.  
-It walks through loading and cleaning three real‑world CSV datasets, engineering text features, training several classifiers, and evaluating their performance.
+## 1. Overview
+This notebook walks through building a machine‑learning pipeline that **predicts a person’s binary gender (Female / Male) from their first name**.  
+Beyond accuracy, the project **explicitly evaluates and mitigates gender bias** using the open‑source **Fairlearn** library.
 
-## Notebook
-* **File:** `gender reveal.ipynb`
-* **Goal:** Achieve the highest possible accuracy while keeping the workflow fully reproducible and explainable.
+## 2. Data
+| File | Purpose |
+|------|---------|
+| `train_data.csv` | Labelled names (Arabic + English) with ground‑truth gender. |
+| `arabic_names.csv` | Extra Arabic pairs; merged after cleaning. |
+| `FreezedNames_final.csv` | Unlabelled names for final inference. |
 
-## Data Sources
-| CSV | Purpose |
-|-----|---------|
-| `train_data.csv` | Core labelled set of Arabic and English names with ground‑truth gender. |
-| `arabic_names.csv` | Supplemental Arabic name–gender pairs – merged after cleaning. |
-| `FreezedNames_final.csv` | Unlabelled names – final target for prediction once the model is trained. |
+Class distribution in the raw training set:
 
-*(All CSVs should live in the same directory as the notebook.)*
+| Gender | Count | %
+|--------|------:|----:|
+| Male   | 47 292 | 85 % |
+| Female |  8 629 | 15 % |
 
-## Pipeline Steps
-1. **Load & merge datasets**  
-   Handle encoding, strip stray whitespace, and drop duplicates.
-2. **Data cleaning**  
-   Remove phone‑number artefacts and rows with null names/genders.
-3. **EDA**  
-   Quick sanity checks on class balance and character distributions.
-4. **Feature engineering**  
-   Use `sklearn.feature_extraction.text.CountVectorizer` to turn each name into character n‑gram counts (1‑ to 3‑grams).
-5. **Train / validation split**  
-   80 % train, 20 % test with a fixed random seed for reproducibility.
-6. **Model training**  
-   * Logistic Regression  
-   * Random Forest Classifier  
-   * HistGradientBoostingClassifier
-7. **Evaluation**  
-   Compute accuracy & confusion matrix on held‑out test data.
-8. **Select best model**  
-   Random Forest achieved **≈ 89 % accuracy**, edging out the boosting model.
-9. **Batch prediction**  
-   Apply the best estimator to `FreezedNames_final.csv` and write results back to disk.
+## 3. Baseline workflow
+1. **Text vectorisation** – character 1–3‑gram counts via `CountVectorizer`.  
+2. **Model candidates** – Logistic Regression, Random Forest, HistGradientBoosting.  
+3. **Baseline accuracy** – RF ≈ 0.87.  
+4. **Fairness check** – with Fairlearn `MetricFrame`:
 
-## Reproducing the Results
-
-### 1. Clone / download the repo
-```bash
-git clone <your‑repo‑url>
-cd gender‑prediction‑names
+```
+Female recall = 0 %
+Male   recall = 87 %
+Equal‑opportunity gap ≈ 0.87
 ```
 
-### 2. Create a virtual environment
+All three baselines defaulted to predicting *Male*, exposing severe bias.
+
+## 4. Fairness evaluation methodology
+```python
+from fairlearn.metrics import MetricFrame, selection_rate, false_positive_rate
+mf = MetricFrame(
+        metrics={"recall": recall_score,
+                 "FPR": false_positive_rate,
+                 "selection_rate": selection_rate},
+        y_true = y_test,
+        y_pred = y_pred,
+        sensitive_features = y_test   # gender labels
+)
+```
+We track **recall gap**, **FPR gap**, and **selection‑rate gap** (Demographic Parity).
+
+## 5. Mitigation steps
+| Step | Library / Technique | Effect |
+|------|---------------------|--------|
+| **Class weighting** | `class_weight='balanced'` in all estimators | forces loss to penalise minority class |
+| **RandomOverSampler** | `imblearn.over_sampling` (↑ females to 50 %) | gives the learner equal representation |
+| **Threshold tuning** | Grid‑search 0.30→0.70 on validation set to minimise recall gap | lifts female recall without tanking accuracy |
+| **Bias‑aware leaderboard** | Stores per‑model gaps then sorts by smallest recall gap | transparent model selection |
+
+## 6. Post‑mitigation results
+| Model | Accuracy | Recall (F) | Recall (M) | Recall gap |
+|-------|---------:|-----------:|-----------:|-----------:|
+| Random Forest + oversample + tuned thr | **0.83** | **0.76** | 0.84 | **0.08** |
+| HistGB + oversample + tuned thr        | 0.80 | 0.72 | 0.82 | 0.10 |
+| Logistic Reg (best thr)                | 0.63 | 0.60 | 0.65 | 0.05 |
+
+*Equal‑opportunity difference* reduced from **0.87 ➜ 0.08**.
+
+## 7. Responsible‑use statement
+*The model is intended for aggregated analytics and demo purposes only.*  
+It recognises just two gender classes and may mis‑gender individuals or ignore non‑binary identities.  
+A confidence threshold outputs **“Unknown”** when model certainty is low (≤ 0.55).
+
+## 8. Reproducing the results
 ```bash
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+git clone <repo-url>
+cd gender-name-gender-pred
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-### 3. Launch the notebook
-```bash
 jupyter notebook
-# open `gender reveal.ipynb`
+# open `gender reveal.ipynb` and run all cells
 ```
 
-### 4. Run all cells
-The notebook is linear—select **Kernel ▸ Restart & Run All** to reproduce training, evaluation, and final predictions.
-
-## Dependencies
+## 9. Dependencies
 ```
-pandas
-numpy
-scikit‑learn
-matplotlib            # optional for plots
+pandas  >= 2.2
+numpy   >= 1.26
+scikit-learn >= 1.5
+fairlearn >= 0.10
+imbalanced-learn >= 0.12
+matplotlib
 jupyter
 ```
 
-*(Versions tested: pandas 2.2, scikit‑learn 1.5, Python 3.11.)*
-
-## Results
-| Model | Test Accuracy |
-|-------|--------------:|
-| Logistic Regression | ~84 % |
-| HistGradientBoosting | ~88 % |
-| **Random Forest** | **~89 %** |
-
-## Next Steps
-* Hyper‑parameter tuning (GridSearch / Optuna).  
-* Try character embeddings + CNN/Bi‑LSTM on the names.  
-* Explore gender‑neutral / ambiguous name handling.
+## 10. Next steps
+* Hyper‑parameter tuning via Optuna.  
+* Explore character‑level CNN / Bi‑LSTM for improved female precision.  
+* Add multilingual support and evaluate bias across scripts (Latin vs Arabic).
 
 ---
 
-© 2025 Abdelrhman El‑Desoky. Feel free to fork and adapt under the MIT license.
+© 2025 Abdelrhman El‑Desoky – Licensed MIT.
